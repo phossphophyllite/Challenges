@@ -1,0 +1,5 @@
+port_scanner/target/
+/debug
+
+**/*.rs.bk
+.env
