@@ -6,14 +6,14 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from train_NN import train_CNN
 
-def Main():
+def Main_CNN():
     data_dir = 'Data/MNIST/raw'
-
-    with open(os.path.join(data_dir, 'train-images-idx3-ubyte'), 'rb') as f:
+    inside = __file__[:-8]
+    with open(os.path.join(inside, data_dir, 'train-images-idx3-ubyte'), 'rb') as f:
             magic, num_images, rows, cols = struct.unpack(">IIII", f.read(16))
             images = np.fromfile(f, dtype=np.uint8).reshape(num_images, rows*cols)
 
-    with open(os.path.join(data_dir, 'train-labels-idx1-ubyte'), 'rb') as f:
+    with open(os.path.join(inside, data_dir, 'train-labels-idx1-ubyte'), 'rb') as f:
         magic, num_labels = struct.unpack(">II", f.read(8))
         labels = np.fromfile(f, dtype=np.uint8)
 
@@ -24,12 +24,12 @@ def Main():
     ### to be generalized to 3-color
     images = images.reshape(N, 1, 28, 28)
     print(f"Shape of an image is {image.shape}")
-    print(f"Pixels range from {np.min(image)} to {np.max(image)}")
+    #print(f"Pixels range from {np.min(image)} to {np.max(image)}")
 
     ### ~~~Constructing data ~~~
     train_split = 0.85 
     ### Hyperparams
-    batch_size = 2
+    batch_size = 64
     learning_rate = 0.01
     validation_split = 0.85
     epochs = 15
@@ -48,16 +48,20 @@ def Main():
 
     train_labels = labels[:train_size]
     test_labels = labels[train_size:]
+    ### Converting to OH
+    train_labels_OH = np.zeros((train_labels.size, train_labels.max() + 1))
+    train_labels_OH[np.arange(train_labels.size), train_labels] = 1
 
+    test_labels_OH = np.zeros((test_labels.size, train_labels.max() + 1))
+    test_labels_OH[np.arange(test_labels.size), test_labels] = 1
 
-
-    ### Expected image shape: N x C x W x H 
+    ### Expected image shape: N x C x H x W
     ### N = number of samples
     ### C = channel number (1 for MNIST)
     ### W, H self explanatory
-    model = train_CNN(train_set, train_labels, hyperparams)
+    model = train_CNN(train_set, train_labels_OH, hyperparams)
 
 
 if __name__ == '__main__':
-    Main()
+    Main_CNN()
 
