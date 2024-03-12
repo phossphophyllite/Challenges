@@ -1,3 +1,4 @@
+from activations import activation_functions_, activation_derivatives_
 import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
@@ -5,199 +6,357 @@ import matplotlib.pyplot as plt
 import sys
 import time
 from numpy.lib.stride_tricks import as_strided
+from collections import OrderedDict
 
     ### "Res" -> {Weight}
     ### "Pool" -> {"Max" or "Avg", Global (bool)}
 
-class CNN_():
-    def __init__(self, structure, img_shape):
+class Model():
+    def __init__(self, Architecture):
         
         ### Initialize model weights to 0
-        self.structure = structure
-        self.img_channels = img_shape[0]
-        self.img_shape = img_shape
-        self.Architecture, self.Output_Channels = self.construct_layers()
+        self.Architecture = Architecture
 
         return
-
-    def construct_layers(self):
-        layers = []
-        self.input_channels = self.img_channels
-        #output_size = self.img_shape
-        for idx, layer in enumerate(self.structure):    
-
-            Cin = self.input_channels
-
-            layer_type, params = layer[0], layer[1]
-
-            if layer_type == "Conv":
-                layers.append(Conv(params, Cin))
-            elif layer_type == "Res":
-                continue
-            elif layer_type =="Pool":
-                layers.append(Pool(params, Cin))
-
-            self.input_channels = params["channels"]
-
-        ### Return the architecture and the shape of the output for softmax
-                ## (Do I need to enforce that the last Cout = Y?)
-        return layers, self.input_channels
-    def first_pass(self, test_img, FC_params):
-        # Run a forward pass to get the output shape
-        output_shape = self.forward_pass(test_img, first_pass=True)
-        # Calculate the total number of features for the FC layer
-        num_features = np.prod(output_shape)  # Product of dimensions
-
-        # Initialize FC layer with calculated number of features
-        FC_layer = FC(FC_params, num_features)
-        self.Architecture.append(FC_layer)
-
     
     def forward_pass(self, img, first_pass = False):
 
-        output = self.Architecture[0].forward_(img)
-        for layer in self.Architecture[1:]:
-            if isinstance(layer, FC):
-                output = output.reshape(output.shape[0], -1)
-                output = layer.forward_(output)
-            else:
-                output = layer.forward_(output)
 
-        probs = self.softmax_(output)
+        ### Use adaptive pooling between end-1 layer and end layer
 
-        if first_pass:
-            return output.shape
-        
         return probs
             
 
     def softmax_(self, logits):
-        expl = np.exp(logits - np.max(logits, axis = 1, keepdims=True))
-        probs = expl / np.sum(expl, axis = 1, keepdims=True)
 
         return probs
     
     def predict(self, y_pred, y_labels):
 
-        y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
-        loss = -np.sum(y_labels * np.log(y_pred))
-
-        predictions = np.argmax(y_pred, axis = 1)
-
         return loss, predictions
 
     def backwards_pass(self, outputs, Y_batch):
         
-
-        ### First, CE Loss
-        ### Then, FC
-        ### Then, Pooling -> Activation -> Conv xN
-        # https://medium.com/@ngocson2vn/a-gentle-explanation-of-backpropagation-in-convolutional-neural-network-cnn-1a70abff508b #
-        ### I want to implement batch SGD here.
-        for idx, (output, Y) in enumerate(zip(outputs, Y_batch)):
-
-
-        ### Loss of the fully connected layer 
-            print(f"Shape of Y is {Y.shape}")
-            label = np.argmax(Y)
-
-            FC_layer = self.Architecture[-1]
-                #self.weights.shape
-                #(4096, 10)  
-            w = FC_layer.weights
-                #(10, 4096)
-            ### f is the input into the FC layer after max pooling
-            ### shape is 64 x 4096, indexed by idx to select the correct row
-            f = FC_layer.f[idx]
-
-            dLS = output
-            dLS[label] = output[label] - 1
-            dLB = np.copy(dLS)
-            FC_layer.dLB_ = dLB
-            ### 10, 4096 partial derivatives matrix
-            dLw = np.zeros((Y.shape[0], f.shape[0]))
-            for i in range(dLw.shape[0]):
-                dLw[i, :] = output[i] * f[:]
-            dLw[i, :] = (output[i] - 1 ) * f[:]
-            FC_layer.dLw_ = dLw
-            ### For the next step of prop
-            dLf = np.zeros(f.shape, dtype=np.float64)
-            for j in range(f.shape[0]):
-                dLf[j] = np.sum( dLS* w[j, :])
-            FC_layer.dLf_ = dLf
-            ### DLF gets fed into the previous layer
-            ## Placeholder for backprop and data. these can be updated automatically
-            ### Everything breaks if my shapes mismatch! let's hope *thaaaat* doesn't happen
-            d_F = dLf
-            out_ = f
-
-            ### This needs to propagate backwards
-            for z, layer_obj in enumerate(reversed(self.Architecture[:-1])):
-                if isinstance(layer_obj, Pool):
-                    dLP = d_F.reshape(layer_obj.pooled[idx].shape)
-                    layer_obj.dLP = dLP
-                    d_F = dLP
-                    out_ = layer_obj.pooled[idx]
-                    I2_ = layer_obj.I2
-                elif isinstance(layer_obj, Conv):
-                    dLC = np.zeros(layer_obj.activated[idx].shape)
-                    # or dLC = np.zeros(layer_obj.layer_output[idx])?
-                    for m in range(out_.shape[0]):
-                        for i in range(out_.shape[1]):
-                            for j in range(out_.shape[2]):
-
-                            
-                        #### Need to implement I2 in the max pooling layer
-
-                                um, vm = I2_[idx, m, i, j]
-                                dLC[m, um, vm] = d_F[m, i, j]
-
-                    dLS = dLC * layer_obj.dCS
-                    dLb = np.zeros(layer_obj.filters)
-                    dLk = np.zeros((layer_obj.filters, layer_obj.Cin, layer_obj.kernel_size[0], layer_obj.kernel_size[1]))
-                    for m in range(layer_obj.filters):
-                        dLb[m] = np.sum(dLS[m])
-                        for m in range(layer_obj.Cin): 
-                            for p in range(layer_obj.kernel_size[0]):
-                                for q in range(layer_obj.kernel_size[1]):
-                                    P = 
-                                    dLk[m,n,p,q] = np.sum(dLS[m] * )
         return
 
-    
+class CNN_Architecture():
+    def __init__(self, layers, img_channels):
 
-### "Conv" -> { Filters (Cout), (Kernel Size), stride, padding, img channels (Cin)}
+        ### I use this during forward, backward pass
+        ### Or do I? hehehehe
+        self.reg = {"start": None, "end": None}
+        self.Structure = self.Create_Structure(layers, img_channels)
+
+
+    def Create_Structure(self, layers, img_channels):  
+        Structure = {}
+        input_shape = img_channels
+
+        ### Iterating through the layers in the ordered Dict.
+        for name, layer in layers.items():
+            ### For reference by Model().        
+            flag = None
+            if layer.get("start") is not None:
+                self.reg["start"] = name
+            if layer.get("end") is not None:
+                self.reg["end"] = name
+
+            if layer.get("input") is None:
+                print(f"No input layer assigned for layer {name}")
+                raise Exception("No input layer assigned.")
+            
+            ### The input layer corresponding to the key stored at the current layer's "input" item
+            input_layer = Structure.get(layer["input"])
+
+            ### I should not have outputs from any layer that doesn't have kernels (pooling and Conv). 
+            ### If the input layer is FC but not the end, then the kernel can be set to 1, though this shouldn't realistically happen.
+            if input_layer is None:
+                print(f"Layer {name} is trying to access layer {layer["input"]}, which does not have an object assigned yet. Check order in the ordered Structure dict.")
+                raise Exception("Incorrect input layer reference.")
+            if not hasattr(input_layer, 'k'):
+                print(f"Layer {name} is trying to access the kernel shape from layer {layer["input"]}, which does not have a kernel assigned yet. Check type assignment in the ordered Structure dict.")
+                raise Exception("Incorrect input size assignment.")
+            
+            ### Generating layers
+            layer_obj = self.create_layer(layer, input_shape)
+            input_shape = layer_obj.k
+            Structure[name] = layer_obj
+
+        return Structure
+
+    def create_layer(self, layer, input_shape):
+
+        layer_input = layer["input"]
+        layer_type = layer["type"]
+        params = layer["params"]
+
+        ### In general, 'input shape' is just the number of kernels in the preceeding pool/conv layer.
+        ### If the layer has a residual connection, this is handled during the residual forward pass, i.e. not by that layer itself.
+        if layer_type == 'conv':
+            layer_obj = Conv(params, layer_input, input_shape)
+
+        if layer_type == 'pool':
+            layer_obj = Pool(params, layer_input, input_shape)
+
+        if layer_type == 'res':
+            layer_obj = Res(params, layer_input, input_shape)
+    
+        if layer_type == 'fc':
+            layer_obj = FC(params, layer_input, input_shape)
+        
+        return layer_obj
+
+
 class Conv():
-    def __init__(self, params, Cin):
-        self.filters = params["channels"]
-        self.Cout = self.filters
-        self.kernel_size = params["kernel"]
-        self.stride = params["stride"]
-        self.Cin = Cin
-        ### I think I need to determine the padding programmatically
-        ### to make sure H + p / s, W + p / s = integer
-        self.padding = params["padding"]
-        self.activation = params.get("activation", "relu")
+    def __init__(self, params, layer_input, input_shape):
+        self.layer_input = layer_input ### Previous layer that the input is derived from during forward pass
+        self.input_shape = input_shape ### Number of kernels output from the previous layer
+        self.k = params["k"] ### Number of kernels
+        self.kernel_shape = params["shape"] ### Square dimension kernels assumed throughout, because why wouldn't I?
+        self.stride = params["stride"] ### Stride
+        self.activation = params["activation"]
 
-    #["Conv", {"channels":16, "kernel":(3,3), "stride": 1, "pad": 1}],
+        self.init_layer()
 
-        ### Initializing the kernel
-        self.weights = self.Kaiming_init()
-        ### Need to init bias as well probably
-        self.biases = np.zeros(self.filters)
-    #(Cout, Cin, k_h, k_w)
-    def Kaiming_init(self):
-        fan_in = self.kernel_size[0]*self.kernel_size[1]*self.Cin
+    def init_layer(self):
+        self.init_weights()
+
+    ### Using Kaiming initialization
+    def init_weights(self):
+        fan_in = self.kernel_shape * self.kernel_shape * self.input_shape
         stdev = np.sqrt(2.0/fan_in)
-        #weights_shape = (self.Cout, self.Cin, self.kernel_size[0], self.kernel_size[1])
-        weights_shape = (self.Cout, self.Cin * self.kernel_size[0] * self.kernel_size[1])
-        weights = np.random.normal(0, stdev, weights_shape)
-        return weights
-    ### I can reshape back if needed, but it seems like there's no need
+        self.shape = (self.k, self.input_shape, self.kernel_shape, self.kernel_shape)
+        self.weights = np.random.normal(0, stdev, self.shape)
+        self.biases = np.zeros(self.k)
+
+    def flatten(self):
+        return self.weights.reshape(self.k, -1)
+
+    def forward_():
+        return
+
+    def backward_(self, dz):
+        return()
     
-    def reshaped_kernel(self):
-        flat_weights = self.weights.reshape(self.Cout, -1)
-        return flat_weights
+class Pool():
+    def __init__(self, params, layer_input, input_shape):
+        self.layer_input = layer_input ### Previous layer that the input is derived from during forward pass
+        self.input_shape = input_shape ### Number of kernels output from the previous layer
+        self.k = params["k"] ### Number of kernels
+        self.kernel_shape = params["shape"] ### Kernel shape, assumed square
+        self.stride = params["stride"] ### Kernel stride
+        self.type_ = params["type"] ### MAX or AVG
+        self.global_ = params["global"] ### whether global
+
+        self.init_layer()
+
+    ### Doesn't seem like there's anything needed here right now. 
+    def init_layer(self):
+        return
+    
+### This is applied to each kernel. Number of kernels doesn't change. This is fine
+class Adaptive_Pool():
+    def __init__(self, input_shape, output_shape, params):
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.type_ = params["type"]
+        self.global_ = params["global"]
+
+    ### Run this during execution.
+    ### Might be slow, but right now it's only partly vectorized
+    def forward_(self, input_):
+        
+        ### Input shape is of the form (N x Nk x m x n)
+        ### Output shape is of the form (N x self.output_shape)
+        ### If global, it's easy - we just flatten and max/avg each row
+        ### If local, it's not so easy - we run adaptive pooling, and only then flatten
+
+        ### Only use this if the number of kernels in the final layer matches the 
+        ### shape of the fully connected layer, defined in Structure["APn"]
+        ### i.e. your last conv has 2048 kernels, and the FC layer has 2048 neurons
+        if self.global_:
+
+            ### Flatten into (N x Nk x m * n) by condensing the last 2 axes
+            flattened = input_.reshape(input_.shape[0], input_.shape[1], -1) 
+            self.input_ = input_
+            output = np.zeros((input_.shape[0], input_.shape[1]))
+
+
+            if self.type_ == "AVG":
+                ### The gradient is distributed as a fraction, i.e. propagated as
+                ### (1 / ( kernel shape ^2 )) * dL/dz 
+                ### for each node. This might be easier, since I can just store it at the time.
+                output = np.mean(flattened, axis=2)
+                return output
+            elif self.type_ == "MAX":
+                ### Store indices of the 'max' values used as a boolean mask.
+                ### Propagate backwards mask * dL/dz
+                output = np.max(flattened, axis=2)
+                return output
+
+        ### This is performed for each kernel. 
+        N, Nk, H, W = input_.shape
+        H_prime, W_prime = self.output_shape
+        stride_H = int(H / H_prime)
+        stride_W = int(W / W_prime)
+        self.stride_H = stride_H
+        self.stride_W = stride_W
+        self.H_prime = H_prime
+        self.W_prime = W_prime
+        output = np.zeros((N, Nk, H_prime, W_prime))
+
+        for i in range(H_prime):
+            for j in range(W_prime):
+                start_H = i * stride_H
+                start_W = j * stride_W 
+                end_H = start_H + stride_H
+                end_W = start_W + stride_W
+                if self.type == "AVG":
+                    output[:, :, i, j] = np.mean(input_[:, :, start_H:end_H, start_W:end_W], axis = (2,3))
+                elif self.type == "MAX":
+                    output[:, :, i, j] = np.max(input_[:, :, start_H:end_H, start_W:end_W], axis = (2,3))
+    def backward_(self, dz):
+        return()
+
+class Res():
+    def __init__(self, params, layer_input, input_shape):
+        self.layer_input = layer_input ### Previous layer that the input is derived from during forward pass
+        self.input_shape = input_shape ### Number of kernels output from the previous layer
+        self.output_layer = params["output"] ### Target output layer of the residual. During forward pass, output is added to this class.
+        self.resize = params["resize"] ### If the shape should be resized. 
+
+    def init_layer(self):
+        return
+
+class FC():
+    def __init__(self, params, layer_input, input_shape):
+        self.layer_input = layer_input ### Input layer (usually a pooling layer)
+        self.input_shape = input_shape ### Input shape (kernels)
+        ### I'm using adaptive pooling. 
+        ### If adaptive pooling isn't being used, you'll need to resize the input somehow else.
+        self.labels = params["labels"] ### Number of classes
+        self.shape = params["shape"] ### Ideal shape of the matrix
+                                     ### In other words, for an input of shape [k * m * n],
+                                     ### the matrix needs to be [k * m * n, Y] for Y labels
+        self.init_weight = params["init_weight"]
+        self.init_layer()
+
+    def init_layer(self):
+        self.weights = np.random((self.shape), self.labels) * self.init_weight
+        self.bias = np.zeros(self.labels) ### One bias per output channel
+        return
+    
+    def forward_(self, input_):
+        self.input_ = input_
+        self.output = np.dot(input_, self.weights) + self.bias
+        return self.output
+    
+    def backward_(self, dz):
+        return()
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+    ### Structure: each key is a specific layer, which its own standardized params.
+    ### Important to note ensure that the input connections are correct.
+    ### Each key stores its parameters
+
+    ### Layer parameters:
+                # "type":       layer type, 'conv', 'pool', 'adpool' 'res', 'fc'; more to come :D
+                # "input":      which layer this layer grabs its input from. dynamically referenced, 
+                #               so it's important to make sure it's correct.
+                #               I'm not explicitly handling 'residual blocks', but manually defining connections.
+                # "obj":        the class object will be stored here after init. not necessary but 
+                #               helps with debugging - can be cut out later.
+
+    ### Optional flags:
+                # "start":      whether this is the initial layer (boolean)
+                # "end":        whether this is the output layer, usually FC (boolean)
+
+    ### Conv layer params: 
+                # "k":          number of convolutional kernels (int)
+                # "shape":      kernel w x w, assume square kernels (int)
+                # "stride":     stride (int)
+                # "activation": activation function, 'relu' or 'tanh' (string)
+
+    ### Pooling layer params:
+                # "k":          number of pooling kernels (int)
+                # "stride":     stride (int)
+                # "type":       whether 'AVG' or 'MAX' (string)
+                # "global":     if global pooling (boolean)
+    
+    ### Adaptive Pooling layer params:
+                # "type":       whether 'AVG' or 'MAX' (string)
+                # "global":     if global pooling (boolean)
+                #               There is no kernel specification, because Nkin = Nkout.
+
+    ### Residual layer params:
+                # "output":     name of the layer it's outputting too (string)
+                # "resize":     whether the layer should be resizing to match the output layer (boolean)
+                #               this could be dynamically determined as a function (if shape is wrong, 
+                #               when called, reshape input to output)
+
+    ### Fully connected layer params:
+                # "shape":      should be input as a variable determining the shape 
+                #               of the OH classification label. i.e. for MNISt, 10. (int)
+
+structure = OrderedDict([
+    ("C1", {"type": 'conv', "input": None,
+            "params": {"k": 64, "shape": 7, "stride": 2, "activation": 'relu'},
+            "obj": None, "start": 1}),
+
+    ("P1", {"type": 'pool', "input": "C1",
+            "params": {"k": 12, "stride": 2, "type": 'MAX', "global": 0},
+            "obj": None}),
+
+    ("R1", {"type": 'res', "input": "P1",
+            "params": {"output": 'C4', "resize": 1},
+            "obj": None}),
+
+    ("C2", {"type": 'conv', "input": "P1",
+            "params": {"k": 128, "shape": 3, "stride": 1, "activation": 'relu'},
+            "obj": None}),
+
+    ("C3", {"type": 'conv', "input": "C2",
+            "params": {"k": 128, "shape": 3, "stride": 1, "activation": 'relu'},
+            "obj": None}),
+
+    ("C4", {"type": 'conv', "input": "C3",
+            "params": {"k": 128, "shape": 3, "stride": 1, "activation": 'relu'},
+            "obj": None}),
+
+    ("C5", {"type": 'conv', "input": "C4",
+            "params": {"k": 128, "shape": 3, "stride": 1, "activation": 'relu'},
+            "obj": None}),
+
+    ("C6", {"type": 'conv', "input": "C5",
+            "params": {"k": 128, "shape": 3, "stride": 2, "activation": 'relu'},
+            "obj": None}),
+
+    ("C7", {"type": 'conv', "input": "C6",
+            "params": {"k": 128, "shape": 3, "stride": 1, "activation": 'relu'},
+            "obj": None}),
+
+    ("AP1", {"type": 'adpool', "input": "C7",
+            "params": {"type": 'MAX', "global": 0},
+            "obj": None}),
+
+    ("FC", {"type": 'fc', "input": "AP1",
+            "params": {"labels": Y.shape[1], "shape": 4096, "init_weight": 0.01}, #### Decide Y.shape elsewhere, placeholder
+            "obj": None, "end": 1}),
+])
+# Ensure all names are unique!
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+####
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OLD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+### holding on to this for reference
+class Conv_():
+    def __init__(self, params, Cin):
+        return
+    ### I can reshape back if needed, but it seems like there's no need
 
     def im2col(self, data):
 
@@ -300,71 +459,6 @@ class Conv():
     ### Full pre-activation:
     # In -> Batch norm -> ReLU -> Weight -> BN -> ReLU -> Weight -> addition
 
-class Residual_FF():
-    def __init__(self, params):
-        return
-
-class Pool():
-    def __init__(self, params, Cin):
-        self.channels = params["channels"]
-        self.type = params["type"] 
-        self.kernel_size = params.get("kernel_size", (2, 2))
-        self.global_ = params["global"]
-        self.stride = params.get("stride", 2)
-        self.Cin = Cin
-        self.activation = params["activation"]
-
-
-    def forward_(self, data):
-
-        if self.global_:
-            self.kernel_size = (data.shape[2], data.shape[3])
-            self.stride = self.kernel_size
-
-        N, C, H, W = data.shape
-        out_h = (H - self.kernel_size[0]) // self.stride + 1
-        out_w = (W - self.kernel_size[1]) // self.stride + 1
-
-        #pooled_out = np.zeros((N, C, out_h, out_w))
-
-        strided = as_strided(data, 
-                             shape=(N, self.channels, out_h, out_w, self.kernel_size[0], self.kernel_size[1]),
-                             strides=(*data.strides[:2], data.strides[2]*self.stride, data.strides[3]*self.stride, *data.strides[2:]),
-                             writeable=False)
-        
-        #I2 = np.zeros((N, C, out_h, out_w, 2), dtype=int)
-        
-        if self.type == "avg":
-            pooled= np.mean(strided, axis=(-2, -1))
-        elif self.type == "max":
-            max_indices = np.argmax(strided.reshape(N, self.channels, out_h, out_w, -1), axis=-1)
-            u, v = np.unravel_index(max_indices, self.kernel_size)
-            pooled = np.max(strided, axis=(-2, -1))
-            self.I2 = np.stack((u, v), axis=-1)
-
-        #self.I2 = I2
-        self.pooled = pooled
-        return pooled
-    
-    def backprop_(self):
-        return
-
-class FC():
-    def __init__(self, params, Cin):
-        self.init_weight = params["init_weight"]
-        self.channels = params["channels"]
-        self.Cin = Cin
-        ### might need to fix the initialization of the FC network.
-        ### But, it's right next to the loss function, so maybe not?
-        self.weights = np.random.randn(self.Cin, self.channels) * self.init_weight
-        self.bias = np.zeros(self.channels)
-
-    def forward_(self, data):
-        self.f = data
-        self.output = np.dot(data, self.weights) + self.bias
-        return self.output
-
-
 
 def gen_batches(features, labels, batch_size):
     N = features.shape[0]
@@ -402,24 +496,7 @@ def train_CNN(features, labels, hyperparams):
     ### Last layer needs to be a Fully connected layer that can be mapped to softmax output.
     ### Average and global pooling not enabled.
 
-    structure = [
-        ["Conv", {"activation":"relu", "channels": 8, "kernel":(3,3), "stride": 1, "padding": 1}],
-        ["Pool", {"activation":"", "channels": 4, "kernel_size": (2,2), "type": "max", "global":False, "stride":2}],
-        ["Conv", {"activation":"relu", "channels":32, "kernel":(3,3), "stride": 1, "padding": 1}],
-        ["Pool", {"activation":"", "channels": 4, "kernel_size": (2,2), "type": "max", "global":False, "stride":2}],
-        ["Conv", {"activation":"relu", "channels":64, "kernel":(2,2), "stride": 1, "padding": 1}],
-        ["Pool", {"activation":"", "channels": 4, "kernel_size": (2,2), "type": "max", "global":False, "stride":2}]
-        
-        ]
-                
-    ### Init the model
-    ### Features.shape[1] is the number of channels
-    img_shape = features.shape[1], features.shape[2], features.shape[3]
-    model = CNN_(structure, img_shape)
 
-    test_image = np.zeros((1, img_shape[0], img_shape[1], img_shape[2]))
-    ### Initializing the fully connected layer after determining output shape
-    model.first_pass(test_image, {"activation":"softmax", "channels": labels.shape[1], "init_weight":0.01})
     
     ### For each step, I split into train/validation sets.
     ### Pass validation sets into the class, train, 
