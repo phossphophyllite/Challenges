@@ -33,7 +33,8 @@ def Main_CNN():
     learning_rate = 0.01
     validation_split = 0.85
     epochs = 15
-    hyperparams = (batch_size, learning_rate, validation_split, epochs)
+    FC_neurons = 2048
+    hyperparams = (batch_size, learning_rate, validation_split, epochs, FC_neurons)
     
     print(f"Shape of the full structure is {images.shape}")
     norm_img = images / 255.0
