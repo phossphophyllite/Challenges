@@ -30,12 +30,12 @@ def Main_CNN():
     train_split = 0.85 
     ### Hyperparams
     batch_size = 64
-    learning_rate = 0.01
+    learning_rate = 0.001
     validation_split = 0.85
     epochs = 15
     FC_neurons = 2048
     hyperparams = (batch_size, learning_rate, validation_split, epochs, FC_neurons)
-    
+    hyperparams = {"batch_size": batch_size, "LR": learning_rate, "validation_split": validation_split, "epochs": epochs, "FC_neurons": FC_neurons}
     print(f"Shape of the full structure is {images.shape}")
     norm_img = images / 255.0
     shuffled_indices = np.random.permutation(norm_img.shape[0])

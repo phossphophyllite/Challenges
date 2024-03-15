@@ -7,6 +7,7 @@ import sys
 import time
 from numpy.lib.stride_tricks import as_strided
 from collections import OrderedDict
+from scipy.signal import convolve2d
 
 class Model():
     def __init__(self, Architecture):
@@ -15,6 +16,9 @@ class Model():
 
         return
     
+    def apply_hyperparams(self, params):
+        self.LR = params["LR"]
+
     def forward_pass(self, X_batch, Y_batch):
 
         for layer_, layer_obj in self.Architecture.Structure.items():
@@ -49,19 +53,24 @@ class Model():
     def CEloss(self, Y_batch):
         self.loss = -np.sum(Y_batch * np.log(self.probs_)) ### Total batch loss
         self.batch_loss = -Y_batch * np.log(self.probs_) ### (64 x 1) loss
-
+        return self.loss
+    
     def backwards_pass(self):
         
         end_layer = self.Architecture.reg.get("end")
         self.Architecture.Structure[end_layer].collect_backprop(self.batch_loss) ### Backprop for N samples in the batch
 
-        for _, layer_obj in reversed(self.Architecture.Structure.items()):
+        for layer, layer_obj in reversed(self.Architecture.Structure.items()):
+            if layer == self.Architecture.reg["start"]:
+                layer_obj.backward_(None) ### If this is the start layer, we never backprop
+                ### A more robust method would probably be to just have a manual 'backprop' method but I'm lazy and it's 11pm
+                continue
             layer_input = layer_obj.layer_input
             input_layer_obj = self.Architecture.Structure[layer_input]
             layer_obj.backward_(input_layer_obj)
 
         for _, layer_obj in reversed(self.Architecture.Structure.items()):
-            layer_obj.sgd_update()
+            layer_obj.sgd_update(self.LR)
     
 
 
@@ -69,10 +78,8 @@ class CNN_Architecture():
     def __init__(self, layers, img_channels):
 
         ### I use this during forward, backward pass
-        ### Or do I? hehehehe
         self.reg = {"start": None, "end": None}
         self.Structure = self.Create_Structure(layers, img_channels)
-
 
     def Create_Structure(self, layers, img_channels):  
         Structure = {}
@@ -80,8 +87,7 @@ class CNN_Architecture():
 
         ### Iterating through the layers in the ordered Dict.
         for name, layer in layers.items():
-        ### For reference by Model().        
-            flag = None
+
             if layer.get("start") is not None:
                 self.reg["start"] = name
             if layer.get("end") is not None:
@@ -100,10 +106,7 @@ class CNN_Architecture():
                 key = "input"
                 print(f"Layer {name} is trying to access layer {layer[key]}, which does not have an object assigned yet. Check order in the ordered Structure dict.")
                 raise Exception("Incorrect input layer reference.")
-            # if not hasattr(input_layer, 'k'):
-            #     print(f"Layer {name} is trying to access the kernel shape from layer {layer[key]}, which does not have a kernel assigned yet. Check type assignment in the ordered Structure dict.")
-            #     raise Exception("Incorrect input size assignment.")
-            
+
         ### Generating layers
         ### I don't need to keep track of the image height/width, just the number of input kernels
             layer_obj = self.create_layer(name, layer, input_shape)
@@ -264,41 +267,71 @@ class Conv():
     def collect_backprop(self, backprop):
         self.backprop += backprop
 
+    def upsample_(self, backprop):
+        if self.stride == 1:
+            return backprop
+
+        upsampled = np.zeros((backprop.shape[0] * self.stride, backprop.shape[1] * self.stride))
+        upsampled[::self.stride, ::self.stride] = backprop
+        return upsampled
+    
     ### Backprop is the loss propagating backwards from later layers
     def backward_(self, input_layer_obj):
         
-        ### dL/dF is just the convolution of X with backprop. Needs to be flattened, though.
+
         self.deactivated_backprop_ = activation_derivatives_(self.activation)(self.output_)
         self.flattened_backprop_ = self.deactivated_backprop_.reshape(self.flattened_output.shape)
+
+        ### If stride = 2, I need to add padding to the dL/dO matrix that's being convolved - slide 34/37
+        self.weights_update = np.dot(self.flattened_backprop_[0, :, :].T, self.flattened_patches)
+        self.weights_update = self.weights_update.reshape(self.weights.shape)
+
+        ### Up to here is correct.
+        ### Need to create a full convolution implementation of the weights matrix
+        ### Flipping the weights matrix
+        self.rot_weights = np.rot90(self.weights, k = 2, axes = (2, 3))
         
-        self.flattened_weight_update = np.dot(self.flattened_backprop_, self.flattened_weights) 
-        
+        self.dLdlayer_batch = np.zeros(self.padded_input_.shape)
+        ### Padding for full convolution
+        ### I give up. How the hell do you vectorize this?
+        for n in range(self.dLdlayer_batch.shape[0]):
+            for c in range(self.dLdlayer_batch.shape[1]):
+                for f in range(self.k): 
+                    #if self.layer_input is not None: 
+                        ### Oh I wonder if account for stride would fix this
+                    self.upsampled_backprop = self.upsample_(self.deactivated_backprop_[n, f, :, :])
+                    self.dLdlayer_batch[n, c, :, :] = convolve2d(self.upsampled_backprop[:,:], self.rot_weights[f, c, :, :], mode='full')
         ### Bias update
         self.bias_update = np.sum(self.backprop, axis = (0, 2, 3)) / (self.backprop.shape[0] * self.backprop.shape[2] * self.backprop.shape[3])
 
         ### Unraveling backprop
-        self.dLdlayer_batch = self.flattened_backprop.reshape(self.N, self.input_shape, self.padded_input_.shape[2], self.padded_input_.shape[3])
+        ### nvm I couldn't figure out how to vectorize 
+        #self.dLdlayer_batch = self..reshape(self.N, self.input_shape, self.padded_input_.shape[2], self.padded_input_.shape[3])
 
         ### Remove padding (doesn't change anything if 0)
-        H_unpad = self.padding[2]
-        W_unpad = self.padding[3]
+        H_unpad = self.pad_shape[2]
+        W_unpad = self.pad_shape[3]
         H_end = self.dLdlayer_batch.shape[2] - H_unpad[1] if H_unpad[1] > 0 else None
         W_end = self.dLdlayer_batch.shape[3] - W_unpad[1] if W_unpad[1] > 0 else None
         self.dLdlayer_batch = self.dLdlayer_batch[:, :, H_unpad[0]:H_end, W_unpad[0]:W_end]        
         ### If there's a residual layer, backprop to it as well
         if self.residual:
-            self.res_pad_H
-            self.res_pad_W
-
-            self.res_layer.collect_backprop(self.dLdlayer_batch)
+            residual_padding = self.residual_padding
+            H_res_unpad = residual_padding[2]
+            W_res_unpad = self.pad_shape[3]
+            H_res_end = self.dLdlayer_batch.shape[2] - H_res_unpad[1] if H_unpad[1] > 0 else None
+            W_res_end = self.dLdlayer_batch.shape[3] - W_res_unpad[1] if W_unpad[1] > 0 else None
+            self.dLdlayer_batch_res = self.dLdlayer_batch[:, :, H_res_unpad[0]:H_res_end, W_res_unpad[0]:W_res_end] 
+            self.res_layer.collect_backprop(self.dLdlayer_batch_res)
 
 #~~~~~~~#
         ### After calculations, backprop to the previous layer
-        input_layer_obj.collect_backprop(self.dLdlayer_batch)
+        if self.layer_input is not None:
+            input_layer_obj.collect_backprop(self.dLdlayer_batch)
 
     def sgd_update(self, LR):
-        self.weights -= LR * self.weights
-        self.bias -= LR * self.bias_update
+        self.weights -= LR * self.weights_update
+        self.biases -= LR * self.bias_update
         return
     
 class Pool():
@@ -314,7 +347,6 @@ class Pool():
 
         self.init_layer()
 
-    ### Doesn't seem like there's anything needed here right now. 
     def init_layer(self):
         return
     
@@ -328,7 +360,6 @@ class Pool():
         if self.global_:
             ### Flatten into (N x Nk x m * n) by condensing the last 2 axes
             self.flattened = input_.reshape(input_.shape[0], input_.shape[1], -1) 
-            output_ = np.zeros((input_.shape[0], input_.shape[1]))
 
             if self.type_ == "AVG":
                 ### The gradient is distributed as a fraction, i.e. propagated as
@@ -366,6 +397,8 @@ class Pool():
 
         self.backprop = np.zeros(self.output_.shape)
 
+    def collect_backprop(self, backprop):
+        self.backprop += backprop
 
     def backward_(self, input_layer_obj):
         
@@ -374,10 +407,10 @@ class Pool():
         for i in range(self.backprop.shape[2]):
             for j in range(self.backprop.shape[3]):
 
-                start_H = i * self.stride_H
-                start_W = j * self.stride_W 
-                end_H = start_H + self.stride_H
-                end_W = start_W + self.stride_W
+                start_H = i * self.stride
+                start_W = j * self.stride
+                end_H = start_H + self.stride
+                end_W = start_W + self.stride
                 
                 if self.type_ == "AVG":
                     avg_size = self.H_prime * self.W_prime
@@ -391,7 +424,9 @@ class Pool():
 
                     self.dLdlayer_batch[:, :, start_H:end_H, start_W:end_W] += masked_backprop * self.backprop[:, :, i, j, np.newaxis, np.newaxis]
         
-        if self.padding_bool: 
+        ### Am I ever padding?
+        #if self.padding_bool: 
+        if False:
             H_unpad = self.padding[2]
             W_unpad = self.padding[3]
             H_end = self.dLdlayer_batch.shape[2] - H_unpad[1] if H_unpad[1] > 0 else None
@@ -475,9 +510,6 @@ class Adaptive_Pool():
         stride_H = H // H_prime
         stride_W = W // W_prime
 
-        #stride_H = 1
-        #stride_W = 1
-
         self.stride_H = stride_H
         self.stride_W = stride_W
         self.H_prime = H_prime
@@ -493,12 +525,10 @@ class Adaptive_Pool():
                 end_W = start_W + stride_W
                 if self.type_ == "AVG":
                     self.output_[:, :, i, j] = np.mean(input_[:, :, start_H:end_H, start_W:end_W], axis = (2,3))
-                    #self.output_.reshape(N, -1)
 
                 elif self.type_ == "MAX":
                     self.output_[:, :, i, j] = np.max(input_[:, :, start_H:end_H, start_W:end_W], axis = (2,3))
-                    #self.output_.reshape(N, -1)
-        print(f"Output shape from the adaptive pooling layer is {self.output_.shape}")
+        #print(f"Output shape from the adaptive pooling layer is {self.output_.shape}")
 
         ### Can reshape during backprop via Nk, H_prime, W_prime to prepare for propagation backwards
         self.backprop = np.zeros(self.output_.shape)
@@ -531,9 +561,7 @@ class Adaptive_Pool():
                     mask = (self.input_[:, :, start_H:end_H, start_W:end_W] == self.output_[:, :, i, j, np.newaxis, np.newaxis])
                     masked_backprop = np.zeros((self.input_.shape[0], self.input_.shape[1], end_H - start_H, end_W - start_W))
                     masked_backprop[mask] = 1
-                    #masked_backprop = np.zeros((self.input_.shape[0], self.input_.shape[1], end_H - start_H, end_W - start_W))
-                    #masked_backprop = np.where(self.input_[:,:,start_H:end_H, start_W:end_W] == self.output_[:, :, i, j], 1, 0) 
-                    ### this is so messy LMAO
+
                     self.dLdlayer_batch[:, :, start_H:end_H, start_W:end_W] += masked_backprop * self.backprop[:, :, i, j, np.newaxis, np.newaxis]
         if self.padding_bool: 
             H_unpad = self.padding[2]
@@ -571,14 +599,13 @@ class Res():
     def collect_backprop(self, backprop):
         self.backprop += backprop
 
-    def backward_pass(self, input_layer_obj):
+    def backward_(self, input_layer_obj):
         ### Just backprop * 1, no operation on the backpropagating loss
-        input_layer_obj.collect_backprop(self.dL_dinput)
+        input_layer_obj.collect_backprop(self.backprop)
 
     def sgd_update(self, LR):
         return
     
-
 class FC():
     def __init__(self, name, params, layer_input, input_shape):
         self.name = name
@@ -622,24 +649,19 @@ class FC():
         self.backprop = np.zeros(self.probs_.shape)
 
     def collect_backprop(self, backprop):
-        print(f"backprop shape {backprop.shape}")
         self.backprop += backprop
     def backward_(self, input_layer_obj):
         ### Easy!
         ### f(x) = x * w + b
-
         ### dimensions are (self.shape * self.labels) * (self.labels) +  (self.labels) 
         ### so backprop dimensions just need to be self.labels to act on each
         self.deactivated_backprop_ = activation_derivatives_(self.activation)(self.output_)
-
 
         ### dL/dw
         self.weight_update = np.dot(self.flattened_input_.T, self.deactivated_backprop_)
 
         self.bias_update = np.sum(self.deactivated_backprop_, axis = 0)
 
-
-        ### (N x 10) . (10 x 2048) -> (N x 2048), will need to be reshaped
         flattened_input_batch = np.dot(self.backprop, self.weights.T)
         self.dLdlayer_batch = flattened_input_batch.reshape(self.input_shape_)
         ### Backpropagating the full matrix of loss with N = 64 for dL/dX
@@ -649,9 +671,19 @@ class FC():
         self.weights -= LR * self.weight_update
         self.bias -= LR * self.bias_update
 
+def gen_batches(features, labels, batch_size):
+    N = features.shape[0]
+    ### Shuffling for each epoch
+    indices = np.random.permutation(N)
+    for start_i in range(0, N, batch_size):
+        end_i = min(start_i + batch_size, N)
+        batch_i = indices[start_i:end_i]
+        yield features[batch_i], labels[batch_i]
 
-
-
+def train_CNN(features, labels, hyperparams):
+    batch_size = hyperparams["batch_size"]
+    epochs = hyperparams["epochs"]
+    FC_neurons = hyperparams["FC_neurons"]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
     ### Structure: each key is a specific layer, which its own standardized params.
     ### Important to note ensure that the input connections are correct.
@@ -704,72 +736,49 @@ class FC():
 
 # Ensure all names are unique!
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-####
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OLD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-
-def gen_batches(features, labels, batch_size):
-    N = features.shape[0]
-    ### Shuffling for each epoch
-    indices = np.random.permutation(N)
-
-    for start_i in range(0, N, batch_size):
-        end_i = min(start_i + batch_size, N)
-        batch_i = indices[start_i:end_i]
-        yield features[batch_i], labels[batch_i]
-
-        
-def train_CNN(features, labels, hyperparams):
-   
-    #(batch_size, learning_rate, validation_split, epochs)
-    batch_size = hyperparams[0]
-    LR = hyperparams[1]
-    split = hyperparams[2]
-    epochs = hyperparams[3]
-    FC_neurons = hyperparams[4]
-
     Structure = OrderedDict([
         ("C1", {"type": 'conv', "input": None,
-                "params": {"k": 32, "shape": 7, "stride": 2, "activation": 'relu'},
+                "params": {"k": 128, "shape": 3, "stride": 2, "activation": 'relu'},
                 "obj": None, "start": 1}),
 
         ("P1", {"type": 'pool', "input": "C1",
-                "params": {"k": 32, "shape": 2, "stride": 1, "type": 'MAX', "global": 0},
+                "params": {"k": 128, "shape": 2, "stride": 1, "type": 'MAX', "global": 0},
                 "obj": None}),
 
-        ("R1", {"type": 'res', "input": "P1",
+        ("Cm", {"type": 'conv', "input": "P1",
+                "params": {"k": 256, "shape": 3, "stride": 1, "activation": 'relu'},
+                "obj": None}),
+
+        ("R1", {"type": 'res', "input": "Cm",
                 "params": {"output": 'C4', "resize": 1},
                 "obj": None}),
 
-        ("C2", {"type": 'conv', "input": "P1",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+        ("C2", {"type": 'conv', "input": "Cm",
+                "params": {"k": 256, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("C3", {"type": 'conv', "input": "C2",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+                "params": {"k": 256, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("C4", {"type": 'conv', "input": "C3",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+                "params": {"k": 256, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("C5", {"type": 'conv', "input": "C4",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+                "params": {"k": 512, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("C6", {"type": 'conv', "input": "C5",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+                "params": {"k": 512, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("C7", {"type": 'conv', "input": "C6",
-                "params": {"k": 32, "shape": 2, "stride": 1, "activation": 'relu'},
+                "params": {"k": 512, "shape": 3, "stride": 1, "activation": 'relu'},
                 "obj": None}),
 
         ("AP1", {"type": 'adpool', "input": "C7",
-                "params": {"type": 'MAX', "k": 32, "output_shape": FC_neurons, "global": 0},
+                "params": {"type": 'MAX', "k": 512, "output_shape": FC_neurons, "global": 0},
                 "obj": None}),
 
         ("FC", {"type": 'fc', "input": "AP1",
@@ -780,6 +789,7 @@ def train_CNN(features, labels, hyperparams):
     img_channels = features.shape[1]
     Architecture = CNN_Architecture(Structure, img_channels)
     model = Model(Architecture)
+    model.apply_hyperparams(hyperparams)
     ### For each step, I split into train/validation sets.
     ### Pass validation sets into the class, train, 
     ### then test against validation, for each epoch
@@ -787,10 +797,10 @@ def train_CNN(features, labels, hyperparams):
     for e in range(epochs):
     ### Split the validation set off here
         
-        batch_count = 1
+        batch_count = 0
         for X_batch, Y_batch in gen_batches(features, labels, batch_size):
             batch_count+=1
-            
+            print(f"On batch {batch_count} out of {int(features.shape[0]/batch_size)}")
             model.forward_pass(X_batch, Y_batch)
 
             loss = model.CEloss(Y_batch)
