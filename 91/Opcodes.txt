@@ -1,0 +1,3 @@
+#https://en.wikipedia.org/wiki/CHIP-8
+
+All opcodes are 2x8 bytes (16 bytes, duh)

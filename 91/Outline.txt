@@ -1,0 +1,87 @@
+Memory: 
+    0x1000 - 4096 bytes
+
+    0000:0511 [0x000-0x1FF] - Chip-8 Integrator ~~Can be used for font info instead~~
+
+    0512:3733 [0x200-0xDFF] - Program
+
+    3744:3839 [0xEA0-0xEFF] - Internal registry/call stack
+    3840:4095 [0xF00-0xFFF] - Display refresh
+
+
+Memory Map:
++---------------+= 0xFFF (4095) End of Chip-8 RAM
+|               |
+|               |
+|               |
+|               |
+|               |
+| 0x200 to 0xFFF|
+|     Chip-8    |
+| Program / Data|
+|     Space     |
+|               |
+|               |
+|               |
++- - - - - - - -+= 0x600 (1536) Start of ETI 660 Chip-8 programs
+|               |
+|               |
+|               |
++---------------+= 0x200 (512) Start of most Chip-8 programs
+| 0x000 to 0x1FF|
+| Reserved for  |
+|  interpreter  |
+
+
+
+Register:
+    V0 - VF, 16 bytes
+    VF is used as a flag for some operations, so effectively 15 free registry entries:
+        In addition, VF is the carry flag
+        In subtraction, VF is the no borrow flag
+        In pixel draw, VF set on pixel collision
+    
+    Address register is 12 bytes - id: I - used with opcodes for memory operations
+
+
+
+Stack:
+    Only used to store return addresses
+    48+ bytes allocated
+
+Timers:
+    Delay Timer - Can be set/read
+    Sound Timer - Can only be set, plays a beep
+
+Input:
+    Originally a hex keyboard (0 to F), using 8 4 6 2 (i.e. numpad) for directional input.
+    Three opcodes:
+        -Skip instruction if correct input is pressed
+        -Skip instruction if correct input is not pressed (re:delay timer)
+        -Waits-stores key press in register when pressed
+
+        Chip-8 Keypad                   Keyboard
+        +-+-+-+-+                    +-+-+-+-+
+        |1|2|3|C|                    |1|2|3|4|
+        +-+-+-+-+                    +-+-+-+-+
+        |4|5|6|D|                    |Q|W|E|R|
+        +-+-+-+-+                    +-+-+-+-+
+        |7|8|9|E|                    |A|S|D|F|
+        +-+-+-+-+                    +-+-+-+-+
+        |A|0|B|F|                    |Z|X|C|V|
+        +-+-+-+-+                    +-+-+-+-+
+
+Display:
+    64 x 32 monochrome Display
+    Sprites: 
+        8px width
+        1-15px height
+        Sprite pixels XOR screen pixels [flip color if sprite pixel = 1, otherwise no change]
+        Collision determined if a pixel is flipped:
+            VF = 1 if a screen pixel is flipped when drawn - collision detection
+            
+    Programs may also refer to a group of sprites representing the hexadecimal digits 0 through F. 
+    These sprites are 5 bytes long, or 8x5 pixels. The data should be stored in the interpreter area of Chip-8 memory (0x000 to 0x1FF).
+    
+Sound:
+    If Sound Timer > 0, plays a beep
