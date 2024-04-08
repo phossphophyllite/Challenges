@@ -10,5 +10,5 @@ Implementing the meme challenges, mostly in python and rust.
 
 77: Mostly completed, some bug in SGD update. I'll take another stab at this later.
 
-91: In progress
+91: Completed
 
